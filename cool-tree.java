@@ -12,8 +12,10 @@ import java.util.Enumeration;
 import java.io.PrintStream;
 import java.util.Vector;
 
+import java.util.Map;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.HashMap;
 
 /** Defines simple phylum Program */
 abstract class Program extends TreeNode {
@@ -157,7 +159,7 @@ abstract class Expression extends TreeNode {
         else
             { out.println(Utilities.pad(n) + ": _no_type"); }
     }
-    public abstract void code(PrintStream s);
+    public abstract void cgen(CGenUtil util);
 
 }
 
@@ -287,34 +289,67 @@ class programc extends Program {
       * @param s the output stream
       * @see CgenClassTable
       * */
-    public void cgen(PrintStream s) {
-    	List<AbstractSymbol> classIds = new ArrayList<>();
-        classIds.add(TreeConstants.Object_);
-        classIds.add(TreeConstants.Bool);
-        classIds.add(TreeConstants.Int);
-        classIds.add(TreeConstants.Str);
-        classIds.add(TreeConstants.IO);
-
-        CGenUtil util = new CGenUtil(s, classIds);
-
-        for (int i = 0; i < classes.getLength(); i++) {
-            class_c klass = (class_c) classes.getNth(i);
-            classIds.add(klass.name);
-        }
+    public void cgen(PrintStream out) {
+        CGenUtil util = new CGenUtil(out, classes);
 
         List<String> classNames = new ArrayList<>();
-        for (int i = 0; i < classIds.size(); i++) {
-            AbstractSymbol klass = classIds.get(i);
+        for (AbstractSymbol klass : util.classIds) {
             String label = util.emitCoolString(klass.toString());
             classNames.add(label);
         }
 
-        s.println("class_nameTab:");
+        out.println("class_nameTab:");
         for (int i = 0; i < classNames.size(); i++) {
-            s.println(".word " + classNames.get(i));
+            out.println("\t.word " + classNames.get(i));
+        }
+
+        Map<AbstractSymbol, AbstractSymbol> inheritance = inheritanceGraph();
+
+        out.println("class_objTab:");
+        for (int i = 0; i < util.numClasses(); i++) {
+            String className = util.getClassById(i).toString();
+            out.println("\t.word " + className + "_protObj");
+            out.println("\t.word " + className + "_init");
+        }
+
+        for (class_c klass : util.getClasses()) {
+            util.outputPrototype(klass);
+        }
+
+        for (class_c klass : util.getClasses()) {
+            out.println(klass.name + "_dispTab:");
+            for (method m : klass.getMethods(util)) {
+                class_c definer = klass.getDefiningClass(util, m);
+                out.println("\t.word " + definer.name + "." + m.name);
+            }
+        }
+
+        for (class_c klass : util.getClasses()) {
+            for (int i = 0; i < klass.features.getLength(); i++) {
+                Feature feature = (Feature) klass.features.getNth(i);
+
+                if (feature instanceof method) {
+                    method m = (method) feature;
+                    m.cgen(klass, util);
+                }
+            }
         }
     }
 
+    private Map<AbstractSymbol, AbstractSymbol> inheritanceGraph() {
+        Map<AbstractSymbol, AbstractSymbol> graph = new HashMap<>();
+        graph.put(TreeConstants.IO, TreeConstants.Object_);
+        graph.put(TreeConstants.Int, TreeConstants.Object_);
+        graph.put(TreeConstants.Str, TreeConstants.Object_);
+        graph.put(TreeConstants.Bool, TreeConstants.Object_);
+
+        for (int i = 0; i < classes.getLength(); i++) {
+            class_c klass = (class_c) classes.getNth(i);
+            graph.put(klass.name, klass.parent);
+        }
+
+        return graph;
+    }
 }
 
 
@@ -371,6 +406,74 @@ class class_c extends Class_ {
     public AbstractSymbol getFilename() { return filename; }
     public Features getFeatures()       { return features; }
 
+    public List<attr> getAttrs(CGenUtil util) {
+        if (name.equals(TreeConstants.Object_)) {
+            return new ArrayList<>();
+        } else {
+            class_c parentClass = util.getClassByName(parent);
+            List<attr> result = parentClass.getAttrs(util);
+
+            for (int i = 0; i < features.getLength(); i++) {
+                Feature feature = (Feature) features.getNth(i);
+
+                if (feature instanceof attr) {
+                    result.add((attr) feature);
+                }
+            }
+
+            return result;
+        }
+    }
+
+    public List<method> getMethods(CGenUtil util) {
+        List<method> result;
+
+        if (name.equals(TreeConstants.Object_)) {
+            result = new ArrayList<>();
+        } else {
+            class_c parentClass = util.getClassByName(parent);
+            result = parentClass.getMethods(util);
+        }
+
+        for (int i = 0; i < features.getLength(); i++) {
+            Feature feature = (Feature) features.getNth(i);
+
+            if (feature instanceof method) {
+                result.add((method) feature);
+            }
+        }
+
+        return result;
+    }
+
+    public class_c getDefiningClass(CGenUtil util, method meth) {
+        for (int i = 0; i < features.getLength(); i++) {
+            Feature feature = (Feature) features.getNth(i);
+
+            if (feature instanceof method) {
+                method m = (method) feature;
+
+                if (m.equals(meth)) {
+                    return this;
+                }
+            }
+        }
+
+        return util.getClassByName(parent).getDefiningClass(util, meth);
+    }
+
+    public int getAttrIndex(CGenUtil util, AbstractSymbol attrName) {
+        List<attr> attrs = getAttrs(util);
+        for (int i = 0; i < attrs.size(); i++) {
+            attr a = attrs.get(i);
+
+            if (a.name.equals(attrName)) {
+                return i;
+            }
+        }
+
+        throw new RuntimeException();
+    }
 }
 
 
@@ -420,6 +523,22 @@ class method extends Feature {
 	expr.dump_with_types(out, n + 2);
     }
 
+    public void cgen(class_c klass, CGenUtil util) {
+        if (util.isBasicClass(klass)) {
+            return;
+        }
+
+        util.out.println(klass.name + "." + name + ":");
+        util.out.println("\tmove $fp $sp");
+        util.push("$ra");
+        expr.cgen(util);
+        util.getTop("$ra");
+
+        int z = 8 + 4 * formals.getLength();
+        util.out.println("\taddiu $sp $sp " + z);
+        util.out.println("\tlw $fp 0($sp)");
+        util.out.println("\tjr $ra");
+    }
 }
 
 
@@ -578,15 +697,9 @@ class assign extends Expression {
 	expr.dump_with_types(out, n + 2);
 	dump_type(out, n);
     }
-    /** Generates code for this expression.  This method is to be completed
-      * in programming assignment 5.  (You may add or remove parameters as
-      * you wish.)
-      * @param s the output stream
-      * */
-    public void code(PrintStream s) {
+
+    public void cgen(CGenUtil util) {
     }
-
-
 }
 
 
@@ -638,15 +751,9 @@ class static_dispatch extends Expression {
         out.println(Utilities.pad(n + 2) + ")");
 	dump_type(out, n);
     }
-    /** Generates code for this expression.  This method is to be completed
-      * in programming assignment 5.  (You may add or remove parameters as
-      * you wish.)
-      * @param s the output stream
-      * */
-    public void code(PrintStream s) {
+
+    public void cgen(CGenUtil util) {
     }
-
-
 }
 
 
@@ -693,15 +800,21 @@ class dispatch extends Expression {
         out.println(Utilities.pad(n + 2) + ")");
 	dump_type(out, n);
     }
-    /** Generates code for this expression.  This method is to be completed
-      * in programming assignment 5.  (You may add or remove parameters as
-      * you wish.)
-      * @param s the output stream
-      * */
-    public void code(PrintStream s) {
+
+    public void cgen(CGenUtil util) {
+        util.push("$fp");
+
+        expr.cgen(util);
+        util.out.println("lw $t0 8($a0)");
+        int functionOffset = util.getClassByName
+        util.out.println("lw $t0 ")
+
+        for (int i = 0; i < actual.getLength(); i++) {
+            Expression e = (Expression) actual.getNth(i);
+            e.cgen(util);
+            util.push("$a0");
+        }
     }
-
-
 }
 
 
@@ -744,15 +857,9 @@ class cond extends Expression {
 	else_exp.dump_with_types(out, n + 2);
 	dump_type(out, n);
     }
-    /** Generates code for this expression.  This method is to be completed
-      * in programming assignment 5.  (You may add or remove parameters as
-      * you wish.)
-      * @param s the output stream
-      * */
-    public void code(PrintStream s) {
-    }
 
-
+        public void cgen(CGenUtil util) {
+        }
 }
 
 
@@ -790,15 +897,9 @@ class loop extends Expression {
 	body.dump_with_types(out, n + 2);
 	dump_type(out, n);
     }
-    /** Generates code for this expression.  This method is to be completed
-      * in programming assignment 5.  (You may add or remove parameters as
-      * you wish.)
-      * @param s the output stream
-      * */
-    public void code(PrintStream s) {
-    }
 
-
+        public void cgen(CGenUtil util) {
+        }
 }
 
 
@@ -838,15 +939,9 @@ class typcase extends Expression {
         }
 	dump_type(out, n);
     }
-    /** Generates code for this expression.  This method is to be completed
-      * in programming assignment 5.  (You may add or remove parameters as
-      * you wish.)
-      * @param s the output stream
-      * */
-    public void code(PrintStream s) {
-    }
 
-
+        public void cgen(CGenUtil util) {
+        }
 }
 
 
@@ -881,13 +976,9 @@ class block extends Expression {
         }
 	dump_type(out, n);
     }
-    /** Generates code for this expression.  This method is to be completed
-      * in programming assignment 5.  (You may add or remove parameters as
-      * you wish.)
-      * @param s the output stream
-      * */
-    public void code(PrintStream s) {
-    }
+
+        public void cgen(CGenUtil util) {
+        }
 
 
 }
@@ -937,15 +1028,9 @@ class let extends Expression {
 	body.dump_with_types(out, n + 2);
 	dump_type(out, n);
     }
-    /** Generates code for this expression.  This method is to be completed
-      * in programming assignment 5.  (You may add or remove parameters as
-      * you wish.)
-      * @param s the output stream
-      * */
-    public void code(PrintStream s) {
-    }
 
-
+        public void cgen(CGenUtil util) {
+        }
 }
 
 
@@ -983,15 +1068,24 @@ class plus extends Expression {
 	e2.dump_with_types(out, n + 2);
 	dump_type(out, n);
     }
-    /** Generates code for this expression.  This method is to be completed
-      * in programming assignment 5.  (You may add or remove parameters as
-      * you wish.)
-      * @param s the output stream
-      * */
-    public void code(PrintStream s) {
+
+    public void cgen(CGenUtil util) {
+        e1.cgen(util);
+        util.push("$a0");
+        e2.cgen(util);
+        util.push("$a0");
+
+        util.out.println("\tjal Object.copy");
+        util.getTop("$t2");
+        util.pop();
+        util.getTop("$t1");
+        util.pop();
+
+        util.out.println("\tlw $t1 12($t1)");
+        util.out.println("\tlw $t2 12($t2)");
+        util.out.println("\tadd $t3 $t1 $t2");
+        util.out.println("\tsw $t3 12($a0)");
     }
-
-
 }
 
 
@@ -1029,15 +1123,9 @@ class sub extends Expression {
 	e2.dump_with_types(out, n + 2);
 	dump_type(out, n);
     }
-    /** Generates code for this expression.  This method is to be completed
-      * in programming assignment 5.  (You may add or remove parameters as
-      * you wish.)
-      * @param s the output stream
-      * */
-    public void code(PrintStream s) {
-    }
 
-
+        public void cgen(CGenUtil util) {
+        }
 }
 
 
@@ -1075,15 +1163,9 @@ class mul extends Expression {
 	e2.dump_with_types(out, n + 2);
 	dump_type(out, n);
     }
-    /** Generates code for this expression.  This method is to be completed
-      * in programming assignment 5.  (You may add or remove parameters as
-      * you wish.)
-      * @param s the output stream
-      * */
-    public void code(PrintStream s) {
-    }
 
-
+        public void cgen(CGenUtil util) {
+        }
 }
 
 
@@ -1121,15 +1203,9 @@ class divide extends Expression {
 	e2.dump_with_types(out, n + 2);
 	dump_type(out, n);
     }
-    /** Generates code for this expression.  This method is to be completed
-      * in programming assignment 5.  (You may add or remove parameters as
-      * you wish.)
-      * @param s the output stream
-      * */
-    public void code(PrintStream s) {
-    }
 
-
+        public void cgen(CGenUtil util) {
+        }
 }
 
 
@@ -1162,15 +1238,9 @@ class neg extends Expression {
 	e1.dump_with_types(out, n + 2);
 	dump_type(out, n);
     }
-    /** Generates code for this expression.  This method is to be completed
-      * in programming assignment 5.  (You may add or remove parameters as
-      * you wish.)
-      * @param s the output stream
-      * */
-    public void code(PrintStream s) {
-    }
 
-
+        public void cgen(CGenUtil util) {
+        }
 }
 
 
@@ -1208,15 +1278,9 @@ class lt extends Expression {
 	e2.dump_with_types(out, n + 2);
 	dump_type(out, n);
     }
-    /** Generates code for this expression.  This method is to be completed
-      * in programming assignment 5.  (You may add or remove parameters as
-      * you wish.)
-      * @param s the output stream
-      * */
-    public void code(PrintStream s) {
-    }
 
-
+        public void cgen(CGenUtil util) {
+        }
 }
 
 
@@ -1254,15 +1318,9 @@ class eq extends Expression {
 	e2.dump_with_types(out, n + 2);
 	dump_type(out, n);
     }
-    /** Generates code for this expression.  This method is to be completed
-      * in programming assignment 5.  (You may add or remove parameters as
-      * you wish.)
-      * @param s the output stream
-      * */
-    public void code(PrintStream s) {
-    }
 
-
+        public void cgen(CGenUtil util) {
+        }
 }
 
 
@@ -1300,15 +1358,9 @@ class leq extends Expression {
 	e2.dump_with_types(out, n + 2);
 	dump_type(out, n);
     }
-    /** Generates code for this expression.  This method is to be completed
-      * in programming assignment 5.  (You may add or remove parameters as
-      * you wish.)
-      * @param s the output stream
-      * */
-    public void code(PrintStream s) {
-    }
 
-
+        public void cgen(CGenUtil util) {
+        }
 }
 
 
@@ -1341,15 +1393,9 @@ class comp extends Expression {
 	e1.dump_with_types(out, n + 2);
 	dump_type(out, n);
     }
-    /** Generates code for this expression.  This method is to be completed
-      * in programming assignment 5.  (You may add or remove parameters as
-      * you wish.)
-      * @param s the output stream
-      * */
-    public void code(PrintStream s) {
-    }
 
-
+        public void cgen(CGenUtil util) {
+        }
 }
 
 
@@ -1382,15 +1428,11 @@ class int_const extends Expression {
 	dump_AbstractSymbol(out, n + 2, token);
 	dump_type(out, n);
     }
-    /** Generates code for this expression.  This method method is provided
-      * to you as an example of code generation.
-      * @param s the output stream
-      * */
-    public void code(PrintStream s) {
-	CgenSupport.emitLoadInt(CgenSupport.ACC,
-                                (IntSymbol)AbstractTable.inttable.lookup(token.getString()), s);
-    }
 
+
+    public void cgen(CGenUtil util) {
+        util.out.println("\tLoad " + token + " into $a0");
+    }
 }
 
 
@@ -1423,14 +1465,10 @@ class bool_const extends Expression {
 	dump_Boolean(out, n + 2, val);
 	dump_type(out, n);
     }
-    /** Generates code for this expression.  This method method is provided
-      * to you as an example of code generation.
-      * @param s the output stream
-      * */
-    public void code(PrintStream s) {
-	CgenSupport.emitLoadBool(CgenSupport.ACC, new BoolConst(val), s);
-    }
 
+    public void cgen(CGenUtil util) {
+        CgenSupport.emitLoadBool(CgenSupport.ACC, new BoolConst(val), util.out);
+    }
 }
 
 
@@ -1465,13 +1503,10 @@ class string_const extends Expression {
 	out.println("\"");
 	dump_type(out, n);
     }
-    /** Generates code for this expression.  This method method is provided
-      * to you as an example of code generation.
-      * @param s the output stream
-      * */
-    public void code(PrintStream s) {
-	CgenSupport.emitLoadString(CgenSupport.ACC,
-                                   (StringSymbol)AbstractTable.stringtable.lookup(token.getString()), s);
+
+    public void cgen(CGenUtil util) {
+        CgenSupport.emitLoadString(CgenSupport.ACC,
+                                  (StringSymbol)AbstractTable.stringtable.lookup(token.getString()), util.out);
     }
 
 }
@@ -1506,14 +1541,9 @@ class new_ extends Expression {
 	dump_AbstractSymbol(out, n + 2, type_name);
 	dump_type(out, n);
     }
-    /** Generates code for this expression.  This method is to be completed
-      * in programming assignment 5.  (You may add or remove parameters as
-      * you wish.)
-      * @param s the output stream
-      * */
-    public void code(PrintStream s) {
-    }
 
+        public void cgen(CGenUtil util) {
+        }
 
 }
 
@@ -1547,15 +1577,9 @@ class isvoid extends Expression {
 	e1.dump_with_types(out, n + 2);
 	dump_type(out, n);
     }
-    /** Generates code for this expression.  This method is to be completed
-      * in programming assignment 5.  (You may add or remove parameters as
-      * you wish.)
-      * @param s the output stream
-      * */
-    public void code(PrintStream s) {
-    }
 
-
+        public void cgen(CGenUtil util) {
+        }
 }
 
 
@@ -1583,14 +1607,9 @@ class no_expr extends Expression {
         out.println(Utilities.pad(n) + "_no_expr");
 	dump_type(out, n);
     }
-    /** Generates code for this expression.  This method is to be completed
-      * in programming assignment 5.  (You may add or remove parameters as
-      * you wish.)
-      * @param s the output stream
-      * */
-    public void code(PrintStream s) {
-    }
 
+        public void cgen(CGenUtil util) {
+        }
 
 }
 
@@ -1624,13 +1643,7 @@ class object extends Expression {
 	dump_AbstractSymbol(out, n + 2, name);
 	dump_type(out, n);
     }
-    /** Generates code for this expression.  This method is to be completed
-      * in programming assignment 5.  (You may add or remove parameters as
-      * you wish.)
-      * @param s the output stream
-      * */
-    public void code(PrintStream s) {
-    }
 
-
+        public void cgen(CGenUtil util) {
+        }
 }
