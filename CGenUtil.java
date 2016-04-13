@@ -11,6 +11,7 @@ public class CGenUtil {
     public List<AbstractSymbol> classIds;
     public PrintStream out;
     private int labelCount;
+    private class_c currClass;
 
     public CGenUtil(PrintStream out, Classes klasses) {
         this.out = out;
@@ -276,5 +277,17 @@ public class CGenUtil {
             name.equals(TreeConstants.Int) ||
             name.equals(TreeConstants.Bool) ||
             name.equals(TreeConstants.Str);
+    }
+
+    public void setCurrentClass(class_c klass) {
+        this.currClass = klass;
+    }
+
+    public class_c resolveIfSelfType(AbstractSymbol className) {
+        if (className.equals(TreeConstants.SELF_TYPE)) {
+            return currClass;
+        } else {
+            return getClassByName(className);
+        }
     }
 }

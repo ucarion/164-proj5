@@ -78,7 +78,7 @@ abstract class Feature extends TreeNode {
         super(lineNumber);
     }
     public abstract void dump_with_types(PrintStream out, int n);
-    
+
     protected abstract void assignTypes(ClassTable classTable, SymbolTable symbolTable);
     protected abstract AbstractSymbol getName();
 }
@@ -315,8 +315,8 @@ class programc extends Program {
         System.err.println("Compilation halted due to static semantic errors.");
         System.exit(1);
     }
-    
-    // Build a graph out of classes; make sure that all classes inherit from Object and 
+
+    // Build a graph out of classes; make sure that all classes inherit from Object and
     // that there are no cycles in the graph (i.e. B inherit from A, A inherits from B )
     private Map<AbstractSymbol, AbstractSymbol> checkInheritanceCycles() {
         Map<AbstractSymbol, AbstractSymbol> graph = new HashMap<>();
@@ -358,7 +358,7 @@ class programc extends Program {
             visited.add(curr);
             curr = graph.get(curr);
         }
-    }    
+    }
 
     //Return true if Main.main() exists, false otherwise
     private boolean checkForMain(ClassTable classTable) {
@@ -380,9 +380,31 @@ class programc extends Program {
 
         return false;
     }
-    
+
     public void cgen(PrintStream out) {
         CGenUtil util = new CGenUtil(out, classes);
+
+        out.println(".data");
+        out.println("_int_tag: .word " + util.getClassId(TreeConstants.Int));
+        out.println("_bool_tag: .word " + util.getClassId(TreeConstants.Bool));
+        out.println("_string_tag: .word " + util.getClassId(TreeConstants.Str));
+        out.println(".globl class_nameTab");
+        out.println(".globl _int_tag");
+        out.println(".globl _bool_tag");
+        out.println(".globl _string_tag");
+        out.println(".globl Main_protObj");
+        out.println(".globl Int_protObj");
+        out.println(".globl String_protObj");
+
+        out.println(".globl _MemMgr_INITIALIZER");
+        out.println("_MemMgr_INITIALIZER: .word _NoGC_Init");
+        out.println(".globl	_MemMgr_COLLECTOR");
+        out.println("_MemMgr_COLLECTOR: .word _NoGC_Collect");
+        out.println(".globl	_MemMgr_TEST");
+        out.println("_MemMgr_TEST:");
+        out.println("\t.word 0");
+        out.println("\t.word -1");
+
 
         List<String> classNames = new ArrayList<>();
         for (AbstractSymbol klass : util.classIds) {
@@ -414,6 +436,16 @@ class programc extends Program {
                 class_c definer = klass.getDefiningClass(util, m);
                 out.println("\t.word " + definer.name + "." + m.name);
             }
+        }
+
+        out.println(".globl heap_start");
+        out.println("heap_start: .word 0");
+        out.println(".text");
+        out.println(".globl Main.main");
+
+        for (AbstractSymbol klass : util.classIds) {
+            out.println(klass + "_init:");
+            out.println(".globl " + klass + "_init");
         }
 
         for (class_c klass : util.getClasses()) {
@@ -552,7 +584,7 @@ class class_c extends Class_ {
 		}
 	}
 
-    //get attribute of class using attribute's name 
+    //get attribute of class using attribute's name
 	protected attr getAttr(AbstractSymbol name, ClassTable classTable) {
 		for (int i = 0; i < features.getLength(); i++) {
 			Feature feature = (Feature) features.getNth(i);
@@ -572,7 +604,7 @@ class class_c extends Class_ {
 			return parentClass.getAttr(name, classTable);
 		}
 	}
-    // method to check that current is either klass or a descendent thereof 
+    // method to check that current is either klass or a descendent thereof
     protected boolean conformsTo(ClassTable classTable, AbstractSymbol klass) {
         if (name.equals(klass)) {
             return true;
@@ -584,7 +616,7 @@ class class_c extends Class_ {
             return classTable.getClassByName(parent).conformsTo(classTable, klass);
         }
     }
-    
+
     public List<attr> getAttrs(CGenUtil util) {
         if (name.equals(TreeConstants.Object_)) {
             return new ArrayList<>();
@@ -653,6 +685,19 @@ class class_c extends Class_ {
 
         throw new RuntimeException();
     }
+
+    public int getMethodIndex(CGenUtil util, AbstractSymbol methodName) {
+        List<method> methods = getMethods(util);
+        for (int i = 0; i < methods.size(); i++) {
+            method m = methods.get(i);
+
+            if (m.name.equals(methodName)) {
+                return i;
+            }
+        }
+
+        throw new RuntimeException();
+    }
 }
 
 
@@ -702,8 +747,8 @@ class method extends Feature {
 	expr.dump_with_types(out, n + 2);
     }
 
-    //assign types to method, make sure no two methods in the same class share a name, that 
-    // parameters have different names and existing types, and that inheritence rules for 
+    //assign types to method, make sure no two methods in the same class share a name, that
+    // parameters have different names and existing types, and that inheritence rules for
     // overriding methods are followed
     protected void assignTypes(ClassTable classTable, SymbolTable symbolTable) {
         symbolTable.enterScope();
@@ -774,18 +819,27 @@ class method extends Feature {
     protected AbstractSymbol getName() {
         return name;
     }
-    
+
     public void cgen(class_c klass, CGenUtil util) {
         if (util.isBasicClass(klass)) {
             return;
         }
 
+        util.setCurrentClass(klass);
+
         util.out.println(klass.name + "." + name + ":");
+
+        util.out.println("\tla $a0 label_1");
+        util.out.println("\tjal IO.out_string");
+
         util.out.println("\tmove $fp $sp");
+
+
         util.push("$ra");
         expr.cgen(util);
         util.getTop("$ra");
 
+        // pop $ra, the formals, and the $fp the caller pushed
         int z = 8 + 4 * formals.getLength();
         util.out.println("\taddiu $sp $sp " + z);
         util.out.println("\tlw $fp 0($sp)");
@@ -973,7 +1027,7 @@ class assign extends Expression {
 	dump_type(out, n);
     }
 
-    //assign types to assignment statements and make sure expression being assigned 
+    //assign types to assignment statements and make sure expression being assigned
     // conforms to type of variable
     protected void assignTypes(ClassTable classTable, SymbolTable symbolTable) {
 		expr.assignTypes(classTable, symbolTable);
@@ -993,7 +1047,7 @@ class assign extends Expression {
 
 		set_type(expr.get_type());
     }
-    
+
     public void cgen(CGenUtil util) {
     }
 }
@@ -1099,7 +1153,7 @@ class static_dispatch extends Expression {
         }
 
     }
-    
+
     public void cgen(CGenUtil util) {
     }
 }
@@ -1200,20 +1254,24 @@ class dispatch extends Expression {
     		}
         }
     }
-    
-    public void cgen(CGenUtil util) {
-        /*util.push("$fp");
 
-        expr.cgen(util);
-        util.out.println("lw $t0 8($a0)");
-        int functionOffset = util.getClassByName
-        util.out.println("lw $t0 ")
+    public void cgen(CGenUtil util) {
+        util.push("$fp");
 
         for (int i = 0; i < actual.getLength(); i++) {
             Expression e = (Expression) actual.getNth(i);
             e.cgen(util);
             util.push("$a0");
-        }*/
+        }
+
+        expr.cgen(util);
+
+        class_c exprClass = util.resolveIfSelfType(expr.get_type());
+        String dispatchTable = exprClass.name + "_dispTab";
+        int offset = 4 * exprClass.getMethodIndex(util, name);
+        util.out.println("\tla $t0 " + dispatchTable);
+        util.out.println("\tlw $t0 "  + offset + "($t0)");
+        util.out.println("\tjalr $t0");
     }
 }
 
@@ -1258,7 +1316,7 @@ class cond extends Expression {
 	dump_type(out, n);
     }
 
-    //assign type to an if-then-else statement and make sure the bit between if and then 
+    //assign type to an if-then-else statement and make sure the bit between if and then
     // is a Bool
     protected void assignTypes(ClassTable classTable, SymbolTable symbolTable) {
         pred.assignTypes(classTable, symbolTable);
@@ -1271,7 +1329,7 @@ class cond extends Expression {
 
         set_type(classTable.joinClasses(then_exp.get_type(), else_exp.get_type(), symbolTable));
     }
-    
+
     public void cgen(CGenUtil util) {
     }
 }
@@ -1323,7 +1381,7 @@ class loop extends Expression {
 
         set_type(TreeConstants.Object_);
     }
-    
+
     public void cgen(CGenUtil util) {
     }
 }
@@ -1395,8 +1453,8 @@ class typcase extends Expression {
         }
 
         set_type(returnType);
-    }    
-    
+    }
+
     public void cgen(CGenUtil util) {
     }
 }
@@ -1444,7 +1502,7 @@ class block extends Expression {
         Expression last = (Expression) body.getNth(body.getLength() - 1);
         set_type(last.get_type());
     }
-    
+
     public void cgen(CGenUtil util) {
     }
 }
@@ -1473,11 +1531,11 @@ class let extends Expression {
         init = a3;
         body = a4;
     }
-    
+
     public TreeNode copy() {
         return new let(lineNumber, copy_AbstractSymbol(identifier), copy_AbstractSymbol(type_decl), (Expression)init.copy(), (Expression)body.copy());
     }
-    
+
     public void dump(PrintStream out, int n) {
         out.print(Utilities.pad(n) + "let\n");
         dump_AbstractSymbol(out, n+2, identifier);
@@ -1514,7 +1572,7 @@ class let extends Expression {
         set_type(body.get_type());
     }
 
-    
+
     public void cgen(CGenUtil util) {
     }
 }
@@ -1565,8 +1623,8 @@ class plus extends Expression {
         }
 
 		set_type(TreeConstants.Int);
-    }    
-    
+    }
+
     public void cgen(CGenUtil util) {
         e1.cgen(util);
         util.push("$a0");
@@ -1632,7 +1690,7 @@ class sub extends Expression {
 
 		set_type(TreeConstants.Int);
     }
-    
+
     public void cgen(CGenUtil util) {
     }
 }
@@ -1682,8 +1740,8 @@ class mul extends Expression {
         }
 
 		set_type(TreeConstants.Int);
-    }    
-    
+    }
+
     public void cgen(CGenUtil util) {
     }
 }
@@ -1733,8 +1791,8 @@ class divide extends Expression {
         }
 
 		set_type(TreeConstants.Int);
-    }    
-    
+    }
+
     public void cgen(CGenUtil util) {
     }
 }
@@ -1778,8 +1836,8 @@ class neg extends Expression {
         }
 
         set_type(TreeConstants.Int);
-    }    
-    
+    }
+
     public void cgen(CGenUtil util) {
     }
 }
@@ -1830,8 +1888,8 @@ class lt extends Expression {
         }
 
         set_type(TreeConstants.Bool);
-    }    
-    
+    }
+
     public void cgen(CGenUtil util) {
     }
 }
@@ -1890,7 +1948,7 @@ class eq extends Expression {
 
         set_type(TreeConstants.Bool);
     }
-    
+
     public void cgen(CGenUtil util) {
     }
 }
@@ -1942,7 +2000,7 @@ class leq extends Expression {
 
         set_type(TreeConstants.Bool);
     }
-    
+
     public void cgen(CGenUtil util) {
     }
 }
@@ -1988,7 +2046,7 @@ class comp extends Expression {
 
         set_type(TreeConstants.Bool);
     }
-    
+
     public void cgen(CGenUtil util) {
     }
 }
@@ -2027,9 +2085,12 @@ class int_const extends Expression {
     protected void assignTypes(ClassTable classTable, SymbolTable symbolTable) {
         set_type(TreeConstants.Int);
     }
-    
+
     public void cgen(CGenUtil util) {
-        util.out.println("\tLoad " + token + " into $a0");
+        util.out.println("\tla $a0 Int_protObj");
+        util.out.println("\tjal Object.copy");
+        util.out.println("\tli $t0 " + token);
+        util.out.println("\tsw $t0 12($a0)");
     }
 }
 
@@ -2067,9 +2128,9 @@ class bool_const extends Expression {
     protected void assignTypes(ClassTable classTable, SymbolTable symbolTable) {
         set_type(TreeConstants.Bool);
     }
-    
+
     public void cgen(CGenUtil util) {
-        CgenSupport.emitLoadBool(CgenSupport.ACC, new BoolConst(val), util.out);
+
     }
 }
 
@@ -2109,12 +2170,9 @@ class string_const extends Expression {
     protected void assignTypes(ClassTable classTable, SymbolTable symbolTable) {
 		set_type(TreeConstants.Str);
     }
-    
-    public void cgen(CGenUtil util) {
-        CgenSupport.emitLoadString(CgenSupport.ACC,
-                                  (StringSymbol)AbstractTable.stringtable.lookup(token.getString()), util.out);
-    }
 
+    public void cgen(CGenUtil util) {
+    }
 }
 
 
@@ -2155,7 +2213,7 @@ class new_ extends Expression {
             set_type(type_name);
         }
     }
-    
+
     public void cgen(CGenUtil util) {
     }
 
@@ -2196,7 +2254,7 @@ class isvoid extends Expression {
         e1.assignTypes(classTable, symbolTable);
         set_type(TreeConstants.Bool);
     }
-    
+
     public void cgen(CGenUtil util) {
     }
 }
@@ -2229,8 +2287,8 @@ class no_expr extends Expression {
 
     protected void assignTypes(ClassTable classTable, SymbolTable symbolTable) {
 
-    }    
-    
+    }
+
     public void cgen(CGenUtil util) {
     }
 
@@ -2288,8 +2346,8 @@ class object extends Expression {
                 classTable.semantError().println("No variable " + name + " found in scope.");
             }
         }
-    }    
-    
+    }
+
     public void cgen(CGenUtil util) {
     }
 }
