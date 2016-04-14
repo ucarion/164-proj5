@@ -5,16 +5,23 @@ import java.util.Map;
 import java.util.HashMap;
 import java.util.Set;
 import java.util.Collection;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 
 public class CGenUtil {
     private Map<AbstractSymbol, class_c> classesByName;
     public List<AbstractSymbol> classIds;
     public PrintStream out;
+
+    private PrintStream dataOut;
+    private ByteArrayOutputStream dataOutHack;
     private int labelCount;
     private class_c currClass;
 
     public CGenUtil(PrintStream out, Classes klasses) {
         this.out = out;
+        this.dataOutHack = new ByteArrayOutputStream();
+        this.dataOut = new PrintStream(this.dataOutHack);
         labelCount = 0;
 
         this.classesByName = new HashMap<>();
@@ -170,83 +177,98 @@ public class CGenUtil {
         out.println("\taddiu $sp $sp 4");
     }
 
-    public String emitCoolString(String value) {
-        String lengthLabel = emitCoolInt(value.length());
+    public String emitCoolDataString(String value) {
+        String lengthLabel = emitCoolDataInt(value.length());
 
-        String label = emitNewLabel();
-        out.println("\t.word " + getClassId(TreeConstants.Str));
+        String label = emitNewDataLabel();
+        dataOut.println("\t.word 5");
         int length = 4 + value.length() / 4 + 1;
 
-        out.println("\t.word " + length);
-        out.println("\t.word String_dispTab");
-        out.println("\t.word " + lengthLabel);
-        out.println("\t.ascii \"" + value + "\"");
-        out.println("\t.byte 0");
-        out.println("\t.align 2");
-        out.println("\t.word -1");
+        dataOut.println("\t.word " + length);
+        dataOut.println("\t.word String_dispTab");
+        dataOut.println("\t.word " + lengthLabel);
+
+        String asciiValue = value.replace("\n", "\\n");
+        dataOut.println("\t.ascii \"" + asciiValue + "\"");
+        dataOut.println("\t.byte 0");
+        dataOut.println("\t.align 2");
+        dataOut.println("\t.word -1");
 
         return label;
     }
 
-    public String emitCoolInt(int value) {
-        String label = emitNewLabel();
+    public String emitCoolDataInt(int value) {
+        String label = emitNewDataLabel();
 
-        out.println("\t.word " + getClassId(TreeConstants.Int));
-        out.println("\t.word 4");
-        out.println("\t.word Int_dispTab");
-        out.println("\t.word " + value);
-        out.println("\t.word -1");
-
-        return label;
-    }
-
-    public String emitCoolBool(boolean value) {
-        String label = emitNewLabel();
-
-        out.println("\t.word " + getClassId(TreeConstants.Bool));
-        out.println("\t.word 4");
-        out.println("\t.word Bool_dispTab");
-
-        int intValue = value ? 1 : 0;
-        out.println("\t.word " + intValue);
-        out.println("\t.word -1");
+        dataOut.println("\t.word " + getClassId(TreeConstants.Int));
+        dataOut.println("\t.word 4");
+        dataOut.println("\t.word Int_dispTab");
+        dataOut.println("\t.word " + value);
+        dataOut.println("\t.word -1");
 
         return label;
     }
 
-    public void outputPrototype(class_c klass) {
-        List<String> attrLabels = new ArrayList<>();
+    // public String emitCoolBool(boolean value) {
+    //     String label = emitNewLabel();
+    //
+    //     out.println("\t.word " + getClassId(TreeConstants.Bool));
+    //     out.println("\t.word 4");
+    //     out.println("\t.word Bool_dispTab");
+    //
+    //     int intValue = value ? 1 : 0;
+    //     out.println("\t.word " + intValue);
+    //     out.println("\t.word -1");
+    //
+    //     return label;
+    // }
+    //
+    // public void outputPrototype(class_c klass) {
+    //     List<String> attrLabels = new ArrayList<>();
+    //
+    //     for (attr a : klass.getAttrs(this)) {
+    //         if (a.type_decl.equals(TreeConstants.Bool)) {
+    //             attrLabels.add(emitCoolBool(false));
+    //         } else if (a.type_decl.equals(TreeConstants.Int)) {
+    //             attrLabels.add(emitCoolInt(0));
+    //         } else if (a.type_decl.equals(TreeConstants.Str)) {
+    //             attrLabels.add(emitCoolString(""));
+    //         } else {
+    //             attrLabels.add("0");
+    //         }
+    //     }
+    //
+    //     out.println(klass.name + "_protObj:");
+    //     out.println("\t.word " + getClassId(klass.name));
+    //     int length = 3 + attrLabels.size();
+    //     out.println("\t.word " + length);
+    //     out.println("\t.word " + klass.name + "_dispTab");
+    //
+    //     for (String label : attrLabels) {
+    //         out.println("\t.word " + label);
+    //     }
+    //
+    //     out.println("\t.word -1");
+    // }
 
-        for (attr a : klass.getAttrs(this)) {
-            if (a.type_decl.equals(TreeConstants.Bool)) {
-                attrLabels.add(emitCoolBool(false));
-            } else if (a.type_decl.equals(TreeConstants.Int)) {
-                attrLabels.add(emitCoolInt(0));
-            } else if (a.type_decl.equals(TreeConstants.Str)) {
-                attrLabels.add(emitCoolString(""));
-            } else {
-                attrLabels.add("0");
-            }
-        }
-
-        out.println(klass.name + "_protObj:");
-        out.println("\t.word " + getClassId(klass.name));
-        int length = 3 + attrLabels.size();
-        out.println("\t.word " + length);
-        out.println("\t.word " + klass.name + "_dispTab");
-
-        for (String label : attrLabels) {
-            out.println("\t.word " + label);
-        }
-
-        out.println("\t.word -1");
+    private String emitNewDataLabel() {
+        String label = getNewLabel();
+        dataOut.println(label + ":");
+        return label;
     }
 
-    private String emitNewLabel() {
+    public String getNewLabel() {
         String label = "label_" + labelCount;
-        out.println(label + ":");
         labelCount++;
         return label;
+    }
+
+    public void dumpDataSegment(PrintStream out) {
+        try {
+            out.write(dataOutHack.toByteArray());
+        } catch (IOException e) {
+
+        }
     }
 
     public int getClassId(AbstractSymbol klass) {

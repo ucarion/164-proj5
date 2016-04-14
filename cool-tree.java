@@ -12,6 +12,11 @@ import java.util.Enumeration;
 import java.io.PrintStream;
 import java.util.Vector;
 
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.io.IOException;
+import java.io.ByteArrayOutputStream;
+
 import java.util.Map;
 import java.util.ArrayList;
 import java.util.List;
@@ -382,81 +387,48 @@ class programc extends Program {
     }
 
     public void cgen(PrintStream out) {
-        CGenUtil util = new CGenUtil(out, classes);
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        CGenUtil util = new CGenUtil(new PrintStream(buffer), classes);
 
-        out.println(".data");
-        out.println("_int_tag: .word " + util.getClassId(TreeConstants.Int));
-        out.println("_bool_tag: .word " + util.getClassId(TreeConstants.Bool));
-        out.println("_string_tag: .word " + util.getClassId(TreeConstants.Str));
-        out.println(".globl class_nameTab");
-        out.println(".globl _int_tag");
-        out.println(".globl _bool_tag");
-        out.println(".globl _string_tag");
-        out.println(".globl Main_protObj");
-        out.println(".globl Int_protObj");
-        out.println(".globl String_protObj");
+        class_c mainClass = (class_c) classes.getNth(0);
+        method mainMethod = (method) mainClass.features.getNth(0);
+        dispatch outStringDispatch = (dispatch) mainMethod.expr;
+        Expression toPrint = (Expression) outStringDispatch.actual.getNth(0);
 
-        out.println(".globl _MemMgr_INITIALIZER");
-        out.println("_MemMgr_INITIALIZER: .word _NoGC_Init");
-        out.println(".globl	_MemMgr_COLLECTOR");
-        out.println("_MemMgr_COLLECTOR: .word _NoGC_Collect");
-        out.println(".globl	_MemMgr_TEST");
-        out.println("_MemMgr_TEST:");
-        out.println("\t.word 0");
-        out.println("\t.word -1");
+        util.out.println("Main.main:");
+        util.push("$fp");
+        util.push("$ra");
 
+        toPrint.cgen(util);
 
-        List<String> classNames = new ArrayList<>();
-        for (AbstractSymbol klass : util.classIds) {
-            String label = util.emitCoolString(klass.toString());
-            classNames.add(label);
+        util.out.println("\tla $t0 IO.out_string");
+
+        util.push("$a0");
+        util.out.println("\tjalr $t0");
+
+        util.getTop("$ra");
+        util.pop();
+        util.getTop("$fp");
+        util.pop();
+        util.out.println("\tjr $ra");
+
+        try {
+            out.println(new String(Files.readAllBytes(Paths.get("prelude-data.txt"))));
+        } catch (IOException e) {
+            System.out.println("err" + e);
         }
 
-        out.println("class_nameTab:");
-        for (int i = 0; i < classNames.size(); i++) {
-            out.println("\t.word " + classNames.get(i));
-        }
+        util.dumpDataSegment(out);
 
-        Map<AbstractSymbol, AbstractSymbol> inheritance = inheritanceGraph();
+        out.println(".globl	heap_start");
+        out.println("heap_start:");
+        out.println(".word	0");
 
-        out.println("class_objTab:");
-        for (int i = 0; i < util.numClasses(); i++) {
-            String className = util.getClassById(i).toString();
-            out.println("\t.word " + className + "_protObj");
-            out.println("\t.word " + className + "_init");
-        }
-
-        for (class_c klass : util.getClasses()) {
-            util.outputPrototype(klass);
-        }
-
-        for (class_c klass : util.getClasses()) {
-            out.println(klass.name + "_dispTab:");
-            for (method m : klass.getMethods(util)) {
-                class_c definer = klass.getDefiningClass(util, m);
-                out.println("\t.word " + definer.name + "." + m.name);
-            }
-        }
-
-        out.println(".globl heap_start");
-        out.println("heap_start: .word 0");
-        out.println(".text");
-        out.println(".globl Main.main");
-
-        for (AbstractSymbol klass : util.classIds) {
-            out.println(klass + "_init:");
-            out.println(".globl " + klass + "_init");
-        }
-
-        for (class_c klass : util.getClasses()) {
-            for (int i = 0; i < klass.features.getLength(); i++) {
-                Feature feature = (Feature) klass.features.getNth(i);
-
-                if (feature instanceof method) {
-                    method m = (method) feature;
-                    m.cgen(klass, util);
-                }
-            }
+        try {
+            out.println(new String(Files.readAllBytes(Paths.get("prelude-text.txt"))));
+            out.write(buffer.toByteArray());
+        } catch (IOException e) {
+            System.out.println("err" + e);
         }
     }
 
@@ -1331,6 +1303,18 @@ class cond extends Expression {
     }
 
     public void cgen(CGenUtil util) {
+        pred.cgen(util);
+        util.out.println("\tlw $t0 12($a0)");
+
+        String falseCaseLabel = util.getNewLabel();
+        String doneLabel = util.getNewLabel();
+
+        util.out.println("\tbeq $t0 $zero " + falseCaseLabel);
+        then_exp.cgen(util);
+        util.out.println("\tj " + doneLabel);
+        util.out.println(falseCaseLabel + ":");
+        else_exp.cgen(util);
+        util.out.println(doneLabel + ":");
     }
 }
 
@@ -1950,6 +1934,25 @@ class eq extends Expression {
     }
 
     public void cgen(CGenUtil util) {
+        e1.cgen(util);
+        util.push("$a0");
+        e2.cgen(util);
+        util.out.println("\tmove $t2 $a0");
+        util.getTop("$t1");
+        util.pop();
+
+        util.out.println("\tli $a0 1");
+        util.out.println("\tli $a1 0");
+        util.out.println("\tjal equality_test");
+        util.push("$a0");
+
+        util.out.println("\tla $t0 Object.copy");
+        util.out.println("\tla $a0 Bool_protObj");
+        util.out.println("\tjalr $t0");
+
+        util.getTop("$t0");
+        util.pop();
+        util.out.println("\tsw $t0 12($a0)");
     }
 }
 
@@ -2130,7 +2133,13 @@ class bool_const extends Expression {
     }
 
     public void cgen(CGenUtil util) {
+        util.out.println("\tla $t0 Object.copy");
+        util.out.println("\tla $a0 Bool_protObj");
+        util.out.println("\tjalr $t0");
 
+        int toStore = val ? 1 : 0;
+        util.out.println("\tli $t0 " + toStore);
+        util.out.println("\tsw $t0 12($a0)");
     }
 }
 
@@ -2172,6 +2181,8 @@ class string_const extends Expression {
     }
 
     public void cgen(CGenUtil util) {
+        String label = util.emitCoolDataString(token.toString());
+        util.out.println("\tla $a0 " + label);
     }
 }
 
