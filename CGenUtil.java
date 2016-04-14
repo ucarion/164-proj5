@@ -200,7 +200,7 @@ public class CGenUtil {
     public String emitCoolDataInt(int value) {
         String label = emitNewDataLabel();
 
-        dataOut.println("\t.word " + getClassId(TreeConstants.Int));
+        dataOut.println("\t.word 3");
         dataOut.println("\t.word 4");
         dataOut.println("\t.word Int_dispTab");
         dataOut.println("\t.word " + value);
@@ -209,47 +209,47 @@ public class CGenUtil {
         return label;
     }
 
-    // public String emitCoolBool(boolean value) {
-    //     String label = emitNewLabel();
-    //
-    //     out.println("\t.word " + getClassId(TreeConstants.Bool));
-    //     out.println("\t.word 4");
-    //     out.println("\t.word Bool_dispTab");
-    //
-    //     int intValue = value ? 1 : 0;
-    //     out.println("\t.word " + intValue);
-    //     out.println("\t.word -1");
-    //
-    //     return label;
-    // }
-    //
-    // public void outputPrototype(class_c klass) {
-    //     List<String> attrLabels = new ArrayList<>();
-    //
-    //     for (attr a : klass.getAttrs(this)) {
-    //         if (a.type_decl.equals(TreeConstants.Bool)) {
-    //             attrLabels.add(emitCoolBool(false));
-    //         } else if (a.type_decl.equals(TreeConstants.Int)) {
-    //             attrLabels.add(emitCoolInt(0));
-    //         } else if (a.type_decl.equals(TreeConstants.Str)) {
-    //             attrLabels.add(emitCoolString(""));
-    //         } else {
-    //             attrLabels.add("0");
-    //         }
-    //     }
-    //
-    //     out.println(klass.name + "_protObj:");
-    //     out.println("\t.word " + getClassId(klass.name));
-    //     int length = 3 + attrLabels.size();
-    //     out.println("\t.word " + length);
-    //     out.println("\t.word " + klass.name + "_dispTab");
-    //
-    //     for (String label : attrLabels) {
-    //         out.println("\t.word " + label);
-    //     }
-    //
-    //     out.println("\t.word -1");
-    // }
+    public String emitCoolDataBool(boolean value) {
+        String label = emitNewDataLabel();
+
+        dataOut.println("\t.word 4");
+        dataOut.println("\t.word 4");
+        dataOut.println("\t.word Bool_dispTab");
+
+        int intValue = value ? 1 : 0;
+        dataOut.println("\t.word " + intValue);
+        dataOut.println("\t.word -1");
+
+        return label;
+    }
+
+    public void emitPrototype(class_c klass) {
+        List<String> attrLabels = new ArrayList<>();
+
+        for (attr a : klass.getAttrs(this)) {
+            if (a.type_decl.equals(TreeConstants.Bool)) {
+                attrLabels.add(emitCoolDataBool(false));
+            } else if (a.type_decl.equals(TreeConstants.Int)) {
+                attrLabels.add(emitCoolDataInt(0));
+            } else if (a.type_decl.equals(TreeConstants.Str)) {
+                attrLabels.add(emitCoolDataString(""));
+            } else {
+                attrLabels.add("0");
+            }
+        }
+
+        dataOut.println(klass.name + "_protObj:");
+        dataOut.println("\t.word 2"); // FIXME
+        int length = 3 + attrLabels.size();
+        dataOut.println("\t.word " + length);
+        dataOut.println("\t.word " + klass.name + "_dispTab");
+
+        for (String label : attrLabels) {
+            dataOut.println("\t.word " + label);
+        }
+
+        dataOut.println("\t.word -1");
+    }
 
     private String emitNewDataLabel() {
         String label = getNewLabel();
@@ -303,6 +303,10 @@ public class CGenUtil {
 
     public void setCurrentClass(class_c klass) {
         this.currClass = klass;
+    }
+
+    public class_c getCurrentClass() {
+        return this.currClass;
     }
 
     public class_c resolveIfSelfType(AbstractSymbol className) {

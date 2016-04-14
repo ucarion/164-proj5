@@ -389,19 +389,25 @@ class programc extends Program {
     public void cgen(PrintStream out) {
         ByteArrayOutputStream buffer = new ByteArrayOutputStream();
         CGenUtil util = new CGenUtil(new PrintStream(buffer), classes);
+        ClassTable classTable = new ClassTable(classes);
 
         class_c mainClass = (class_c) classes.getNth(0);
-        method mainMethod = (method) mainClass.features.getNth(0);
+
+        method mainMethod = mainClass.getMethod(TreeConstants.main_meth, classTable);
         dispatch outStringDispatch = (dispatch) mainMethod.expr;
         Expression toPrint = (Expression) outStringDispatch.actual.getNth(0);
+
+        util.emitPrototype(mainClass);
 
         util.out.println("Main.main:");
         util.push("$fp");
         util.push("$ra");
+        util.out.println("move $s0 $a0");
 
+        util.setCurrentClass(mainClass);
         toPrint.cgen(util);
 
-        util.out.println("\tla $t0 IO.out_string");
+        util.out.println("\tla $t0 IO.out_int");
 
         util.push("$a0");
         util.out.println("\tjalr $t0");
@@ -1021,6 +1027,12 @@ class assign extends Expression {
     }
 
     public void cgen(CGenUtil util) {
+        expr.cgen(util);
+
+        class_c selfClass = util.getCurrentClass();
+        int offset = 12 + 4 * selfClass.getAttrIndex(util, name);
+
+        util.out.println("\tsw $a0 " + offset + "($s0)");
     }
 }
 
@@ -1228,8 +1240,6 @@ class dispatch extends Expression {
     }
 
     public void cgen(CGenUtil util) {
-        util.push("$fp");
-
         for (int i = 0; i < actual.getLength(); i++) {
             Expression e = (Expression) actual.getNth(i);
             e.cgen(util);
@@ -1239,9 +1249,8 @@ class dispatch extends Expression {
         expr.cgen(util);
 
         class_c exprClass = util.resolveIfSelfType(expr.get_type());
-        String dispatchTable = exprClass.name + "_dispTab";
         int offset = 4 * exprClass.getMethodIndex(util, name);
-        util.out.println("\tla $t0 " + dispatchTable);
+        util.out.println("\tlw $t0 8($a0)");
         util.out.println("\tlw $t0 "  + offset + "($t0)");
         util.out.println("\tjalr $t0");
     }
@@ -1367,6 +1376,17 @@ class loop extends Expression {
     }
 
     public void cgen(CGenUtil util) {
+        String startLabel = util.getNewLabel();
+        String doneLabel = util.getNewLabel();
+
+        util.out.println(startLabel + ":");
+        pred.cgen(util);
+        util.out.println("\tlw $t0 12($a0)");
+        util.out.println("\tbeq $t0 $zero " + doneLabel);
+        body.cgen(util);
+        util.out.println("\tj " + startLabel);
+        util.out.println(doneLabel + ":");
+        util.out.println("\tli $a0 0");
     }
 }
 
@@ -1488,6 +1508,10 @@ class block extends Expression {
     }
 
     public void cgen(CGenUtil util) {
+        for (int i = 0; i < body.getLength(); i++) {
+            Expression expr = (Expression) body.getNth(i);
+            expr.cgen(util);
+        }
     }
 }
 
@@ -1676,6 +1700,21 @@ class sub extends Expression {
     }
 
     public void cgen(CGenUtil util) {
+        e1.cgen(util);
+        util.push("$a0");
+        e2.cgen(util);
+        util.push("$a0");
+
+        util.out.println("\tjal Object.copy");
+        util.getTop("$t2");
+        util.pop();
+        util.getTop("$t1");
+        util.pop();
+
+        util.out.println("\tlw $t1 12($t1)");
+        util.out.println("\tlw $t2 12($t2)");
+        util.out.println("\tsub $t3 $t1 $t2");
+        util.out.println("\tsw $t3 12($a0)");
     }
 }
 
@@ -1727,6 +1766,21 @@ class mul extends Expression {
     }
 
     public void cgen(CGenUtil util) {
+        e1.cgen(util);
+        util.push("$a0");
+        e2.cgen(util);
+        util.push("$a0");
+
+        util.out.println("\tjal Object.copy");
+        util.getTop("$t2");
+        util.pop();
+        util.getTop("$t1");
+        util.pop();
+
+        util.out.println("\tlw $t1 12($t1)");
+        util.out.println("\tlw $t2 12($t2)");
+        util.out.println("\tmul $t3 $t1 $t2");
+        util.out.println("\tsw $t3 12($a0)");
     }
 }
 
@@ -1778,6 +1832,22 @@ class divide extends Expression {
     }
 
     public void cgen(CGenUtil util) {
+        e1.cgen(util);
+        util.push("$a0");
+        e2.cgen(util);
+        util.push("$a0");
+
+        util.out.println("\tjal Object.copy");
+        util.getTop("$t2");
+        util.pop();
+        util.getTop("$t1");
+        util.pop();
+
+        util.out.println("\tlw $t1 12($t1)");
+        util.out.println("\tlw $t2 12($t2)");
+        util.out.println("\tdiv $t1 $t2");
+        util.out.println("\tmflo $t3");
+        util.out.println("\tsw $t3 12($a0)");
     }
 }
 
@@ -1823,6 +1893,17 @@ class neg extends Expression {
     }
 
     public void cgen(CGenUtil util) {
+        e1.cgen(util);
+        util.push("$a0");
+
+        util.out.println("\tjal Object.copy");
+        util.getTop("$t1");
+        util.pop();
+
+        util.out.println("\tlw $t1 12($t1)");
+        util.out.println("\tli $t2 -1");
+        util.out.println("\tmul $t3 $t1 $t2");
+        util.out.println("\tsw $t3 12($a0)");
     }
 }
 
@@ -1875,6 +1956,23 @@ class lt extends Expression {
     }
 
     public void cgen(CGenUtil util) {
+        e1.cgen(util);
+        util.push("$a0");
+        e2.cgen(util);
+        util.push("$a0");
+
+        util.out.println("\tla $a0 Bool_protObj");
+        util.out.println("\tjal Object.copy");
+
+        util.getTop("$t2");
+        util.pop();
+        util.getTop("$t1");
+        util.pop();
+
+        util.out.println("\tlw $t1 12($t1)");
+        util.out.println("\tlw $t2 12($t2)");
+        util.out.println("\tslt $t3 $t1 $t2");
+        util.out.println("\tsw $t3 12($a0)");
     }
 }
 
@@ -2005,6 +2103,24 @@ class leq extends Expression {
     }
 
     public void cgen(CGenUtil util) {
+        e1.cgen(util);
+        util.push("$a0");
+        e2.cgen(util);
+        util.push("$a0");
+
+        util.out.println("\tla $a0 Bool_protObj");
+        util.out.println("\tjal Object.copy");
+
+        util.getTop("$t2");
+        util.pop();
+        util.getTop("$t1");
+        util.pop();
+
+        util.out.println("\tlw $t1 12($t1)");
+        util.out.println("\tlw $t2 12($t2)");
+        util.out.println("\tsub $t3 $t1 $t2");
+        util.out.println("\tslti $t3 $t3 1");
+        util.out.println("\tsw $t3 12($a0)");
     }
 }
 
@@ -2051,6 +2167,19 @@ class comp extends Expression {
     }
 
     public void cgen(CGenUtil util) {
+        e1.cgen(util);
+        util.push("$a0");
+
+        util.out.println("\tla $a0 Bool_protObj");
+        util.out.println("\tjal Object.copy");
+
+        util.getTop("$t1");
+        util.pop();
+
+        util.out.println("\tlw $t1 12($t1)");
+        util.out.println("\tli $t2 1");
+        util.out.println("\tsub $t3 $t2 $t1");
+        util.out.println("\tsw $t3 12($a0)");
     }
 }
 
@@ -2360,5 +2489,15 @@ class object extends Expression {
     }
 
     public void cgen(CGenUtil util) {
+        if (name.equals(TreeConstants.self)) {
+            // fetch self
+            util.out.println("\tmove $a0 $s0");
+        } else {
+            // fetch attr
+            class_c selfClass = util.getCurrentClass();
+            int offset = 12 + 4 * selfClass.getAttrIndex(util, name);
+
+            util.out.println("\tlw $a0 " + offset + "($s0)");
+        }
     }
 }
