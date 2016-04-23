@@ -402,7 +402,7 @@ class programc extends Program {
         util.out.println("Main.main:");
         util.push("$fp");
         util.push("$ra");
-        util.out.println("move $s0 $a0");
+        util.out.println("\tmove $s0 $a0");
 
         util.setCurrentClass(mainClass);
         toPrint.cgen(util);
@@ -1460,6 +1460,34 @@ class typcase extends Expression {
     }
 
     public void cgen(CGenUtil util) {
+        expr.cgen(util);
+        util.out.println("\tlw $t0 0($a0)");
+
+        List<String> branchLabels = new ArrayList<>();
+
+        for (int i = 0; i < cases.getLength(); i++) {
+            branch b = (branch) cases.getNth(i);
+            String label = util.getNewLabel();
+            branchLabels.add(label);
+
+            int branchClassId = util.getClassId(b.type_decl);
+            util.out.println("\tbeq $t0 " + branchClassId + " " + label);
+        }
+
+        util.out.println("\tj _case_abort");
+
+        String doneLabel = util.getNewLabel();
+
+        for (int i = 0; i < cases.getLength(); i++) {
+            branch b = (branch) cases.getNth(i);
+            String label = branchLabels.get(i);
+            util.out.println(label + ":");
+
+            b.expr.cgen(util);
+            util.out.println("\tj " + doneLabel);
+        }
+
+        util.out.println(doneLabel + ":");
     }
 }
 
