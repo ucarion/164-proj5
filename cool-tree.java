@@ -388,35 +388,19 @@ class programc extends Program {
 
     public void cgen(PrintStream out) {
         ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+
+        List<class_c> classes = new ArrayList<>();
+        for (int i = 0; i < this.classes.getLength(); i++) {
+            classes.add((class_c) this.classes.getNth(i));
+        }
+
         CGenUtil util = new CGenUtil(new PrintStream(buffer), classes);
-        ClassTable classTable = new ClassTable(classes);
 
-        class_c mainClass = (class_c) classes.getNth(0);
+        util.emitDataTables();
 
-        method mainMethod = mainClass.getMethod(TreeConstants.main_meth, classTable);
-        dispatch outStringDispatch = (dispatch) mainMethod.expr;
-        Expression toPrint = (Expression) outStringDispatch.actual.getNth(0);
-
-        util.emitPrototype(mainClass);
-
-        util.out.println("Main.main:");
-        util.push("$fp");
-        util.push("$ra");
-        util.out.println("\tmove $s0 $a0");
-
-        util.setCurrentClass(mainClass);
-        toPrint.cgen(util);
-
-        util.out.println("\tla $t0 IO.out_int");
-
-        util.push("$a0");
-        util.out.println("\tjalr $t0");
-
-        util.getTop("$ra");
-        util.pop();
-        util.getTop("$fp");
-        util.pop();
-        util.out.println("\tjr $ra");
+        for (class_c klass : util.getClasses()) {
+            klass.cgen(util);
+        }
 
         try {
             out.println(new String(Files.readAllBytes(Paths.get("prelude-data.txt"))));
@@ -562,6 +546,27 @@ class class_c extends Class_ {
 		}
 	}
 
+    protected method getMethodCgen(AbstractSymbol name, CGenUtil util) {
+        for (int i = 0; i < features.getLength(); i++) {
+            Feature feature = (Feature) features.getNth(i);
+            if (feature instanceof method) {
+                method m = (method) feature;
+
+                if (m.name.equals(name)) {
+                    return m;
+                }
+            }
+        }
+
+        if (this.name == TreeConstants.Object_) {
+            return null;
+        } else {
+            class_c parentClass = util.getClassByName(parent);
+            return parentClass.getMethodCgen(name, util);
+        }
+    }
+
+
     //get attribute of class using attribute's name
 	protected attr getAttr(AbstractSymbol name, ClassTable classTable) {
 		for (int i = 0; i < features.getLength(); i++) {
@@ -664,9 +669,34 @@ class class_c extends Class_ {
         throw new RuntimeException();
     }
 
+    public List<method> getCallableMethods(CGenUtil util) {
+        List<method> result = new ArrayList<>();
+        getCallableMethods(util, new HashSet<AbstractSymbol>(), result);
+        return result;
+    }
+
+    public void getCallableMethods(CGenUtil util, Set<AbstractSymbol> taken, List<method> result) {
+        for (int i = 0; i < features.getLength(); i++) {
+            if (features.getNth(i) instanceof method) {
+                method m = (method) features.getNth(i);
+
+                if (!taken.contains(m.name)) {
+                    result.add(m);
+                    taken.add(m.name);
+                }
+            }
+        }
+
+        if (this.name == TreeConstants.Object_) {
+            return;
+        } else {
+            util.getClassByName(parent).getCallableMethods(util, taken, result);
+        }
+    }
+
     public int getMethodIndex(CGenUtil util, AbstractSymbol methodName) {
-        List<method> methods = getMethods(util);
-        for (int i = 0; i < methods.size(); i++) {
+        List<method> methods = getCallableMethods(util);
+        for (int i = methods.size() - 1; i >= 0; i--) {
             method m = methods.get(i);
 
             if (m.name.equals(methodName)) {
@@ -675,6 +705,28 @@ class class_c extends Class_ {
         }
 
         throw new RuntimeException();
+    }
+
+    protected void cgen(CGenUtil util) {
+        util.emitPrototype(this);
+        util.emitDispatchTable(this);
+
+        if (util.isBasicClass(this)) {
+            return;
+        }
+
+        util.emitInit(this);
+
+        util.setCurrentClass(this);
+
+        for (int i = 0; i < features.getLength(); i++) {
+            Feature f = (Feature) features.getNth(i);
+            if (f instanceof method) {
+                method m = (method) f;
+                util.out.println(name + "." + m.name + ":");
+                m.cgen(util);
+            }
+        }
     }
 }
 
@@ -798,30 +850,38 @@ class method extends Feature {
         return name;
     }
 
-    public void cgen(class_c klass, CGenUtil util) {
-        if (util.isBasicClass(klass)) {
-            return;
+    public void cgen(CGenUtil util) {
+        util.enterScope();
+
+        for (int i = 0; i < formals.getLength(); i++) {
+            formalc formal = (formalc) formals.getNth(i);
+
+            int offset = 8 + (formals.getLength() - i - 1) * 4;
+            util.pushLocalVariable(formal.name, offset);
         }
 
-        util.setCurrentClass(klass);
-
-        util.out.println(klass.name + "." + name + ":");
-
-        util.out.println("\tla $a0 label_1");
-        util.out.println("\tjal IO.out_string");
-
+        util.pushNoCount("$fp");
         util.out.println("\tmove $fp $sp");
-
-
         util.push("$ra");
+        util.push("$s0");
+        util.out.println("\tmove $s0 $a0");
         expr.cgen(util);
+        util.getTop("$s0");
+        util.pop();
         util.getTop("$ra");
+        util.pop();
+        util.getTop("$fp");
+        util.popNoCount();
 
-        // pop $ra, the formals, and the $fp the caller pushed
-        int z = 8 + 4 * formals.getLength();
-        util.out.println("\taddiu $sp $sp " + z);
-        util.out.println("\tlw $fp 0($sp)");
+        for (int i = 0; i < formals.getLength(); i++) {
+            formalc formal = (formalc) formals.getNth(i);
+            util.popLocalVariable(formal.name);
+            util.pop();
+        }
+
         util.out.println("\tjr $ra");
+
+        util.exitScope();
     }
 }
 
@@ -1029,10 +1089,15 @@ class assign extends Expression {
     public void cgen(CGenUtil util) {
         expr.cgen(util);
 
-        class_c selfClass = util.getCurrentClass();
-        int offset = 12 + 4 * selfClass.getAttrIndex(util, name);
+        if (util.getLocalVariableOffset(name) != -1) {
+            int offset = util.getLocalVariableOffset(name);
+            util.out.println("\tsw $a0 " + offset + "($fp)");
+        } else {
+            class_c selfClass = util.getCurrentClass();
+            int offset = 12 + 4 * selfClass.getAttrIndex(util, name);
 
-        util.out.println("\tsw $a0 " + offset + "($s0)");
+            util.out.println("\tsw $a0 " + offset + "($s0)");
+        }
     }
 }
 
@@ -1243,7 +1308,7 @@ class dispatch extends Expression {
         for (int i = 0; i < actual.getLength(); i++) {
             Expression e = (Expression) actual.getNth(i);
             e.cgen(util);
-            util.push("$a0");
+            util.pushNoCount("$a0");
         }
 
         expr.cgen(util);
@@ -1463,6 +1528,8 @@ class typcase extends Expression {
         expr.cgen(util);
         util.out.println("\tlw $t0 0($a0)");
 
+        int offset = util.push("$a0");
+
         List<String> branchLabels = new ArrayList<>();
 
         for (int i = 0; i < cases.getLength(); i++) {
@@ -1483,11 +1550,14 @@ class typcase extends Expression {
             String label = branchLabels.get(i);
             util.out.println(label + ":");
 
+            util.pushLocalVariable(b.name, offset);
             b.expr.cgen(util);
             util.out.println("\tj " + doneLabel);
+            util.popLocalVariable(b.name);
         }
 
         util.out.println(doneLabel + ":");
+        util.pop();
     }
 }
 
@@ -1610,6 +1680,30 @@ class let extends Expression {
 
 
     public void cgen(CGenUtil util) {
+        if (init instanceof no_expr) {
+            if (type_decl.equals(TreeConstants.Int)) {
+                String label = util.emitCoolDataInt(0);
+                util.out.println("\tla $a0 " + label);
+            } else if (type_decl.equals(TreeConstants.Bool)) {
+                String label = util.emitCoolDataBool(false);
+                util.out.println("\tla $a0 " + label);
+            } else if (type_decl.equals(TreeConstants.Str)) {
+                String label = util.emitCoolDataString("");
+                util.out.println("\tla $a0 " + label);
+            } else {
+                util.out.println("\tli $a0 0");
+            }
+        } else {
+            init.cgen(util);
+        }
+
+        int offset = util.push("$a0");
+
+        util.pushLocalVariable(identifier, offset);
+        body.cgen(util);
+        util.popLocalVariable(identifier);
+
+        util.pop();
     }
 }
 
@@ -2067,18 +2161,9 @@ class eq extends Expression {
         util.getTop("$t1");
         util.pop();
 
-        util.out.println("\tli $a0 1");
-        util.out.println("\tli $a1 0");
+        util.out.println("\tla $a0 bool_const1");
+        util.out.println("\tla $a1 bool_const0");
         util.out.println("\tjal equality_test");
-        util.push("$a0");
-
-        util.out.println("\tla $t0 Object.copy");
-        util.out.println("\tla $a0 Bool_protObj");
-        util.out.println("\tjalr $t0");
-
-        util.getTop("$t0");
-        util.pop();
-        util.out.println("\tsw $t0 12($a0)");
     }
 }
 
@@ -2247,10 +2332,8 @@ class int_const extends Expression {
     }
 
     public void cgen(CGenUtil util) {
-        util.out.println("\tla $a0 Int_protObj");
-        util.out.println("\tjal Object.copy");
-        util.out.println("\tli $t0 " + token);
-        util.out.println("\tsw $t0 12($a0)");
+        String label = util.emitCoolDataInt(Integer.parseInt(token.toString()));
+        util.out.println("\tla $a0 " + label);
     }
 }
 
@@ -2290,13 +2373,8 @@ class bool_const extends Expression {
     }
 
     public void cgen(CGenUtil util) {
-        util.out.println("\tla $t0 Object.copy");
-        util.out.println("\tla $a0 Bool_protObj");
-        util.out.println("\tjalr $t0");
-
-        int toStore = val ? 1 : 0;
-        util.out.println("\tli $t0 " + toStore);
-        util.out.println("\tsw $t0 12($a0)");
+        String label = util.emitCoolDataBool(val);
+        util.out.println("\tla $a0 " + label);
     }
 }
 
@@ -2383,8 +2461,10 @@ class new_ extends Expression {
     }
 
     public void cgen(CGenUtil util) {
+        util.out.println("\tla $a0 " + type_name + "_protObj");
+        util.out.println("\tjal Object.copy");
+        util.out.println("\tjal " + type_name + "_init");
     }
-
 }
 
 
@@ -2521,11 +2601,17 @@ class object extends Expression {
             // fetch self
             util.out.println("\tmove $a0 $s0");
         } else {
-            // fetch attr
-            class_c selfClass = util.getCurrentClass();
-            int offset = 12 + 4 * selfClass.getAttrIndex(util, name);
+            int offset = util.getLocalVariableOffset(name);
+            if (offset != -1) {
+                // fetch local variable relative to $fp
+                util.out.println("\tlw $a0 " + offset + "($fp)");
+            } else {
+                // fetch attr
+                class_c selfClass = util.getCurrentClass();
+                offset = 12 + 4 * selfClass.getAttrIndex(util, name);
 
-            util.out.println("\tlw $a0 " + offset + "($s0)");
+                util.out.println("\tlw $a0 " + offset + "($s0)");
+            }
         }
     }
 }

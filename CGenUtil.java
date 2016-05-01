@@ -7,6 +7,7 @@ import java.util.Set;
 import java.util.Collection;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.util.Stack;
 
 public class CGenUtil {
     private Map<AbstractSymbol, class_c> classesByName;
@@ -17,21 +18,20 @@ public class CGenUtil {
     private ByteArrayOutputStream dataOutHack;
     private int labelCount;
     private class_c currClass;
+    private Stack<Integer> numPushes;
+    private Map<AbstractSymbol, Stack<Integer>> localVariables;
 
-    public CGenUtil(PrintStream out, Classes klasses) {
+    public CGenUtil(PrintStream out, List<class_c> classes) {
         this.out = out;
         this.dataOutHack = new ByteArrayOutputStream();
         this.dataOut = new PrintStream(this.dataOutHack);
-        labelCount = 0;
+        this.labelCount = 0;
+        this.numPushes = new Stack<>();
+        this.numPushes.push(0);
+        this.localVariables = new HashMap<>();
 
         this.classesByName = new HashMap<>();
         this.classIds = new ArrayList<>();
-
-        for (int i = 0; i < klasses.getLength(); i++) {
-            class_c klass = (class_c) klasses.getNth(i);
-            classesByName.put(klass.name, klass);
-            classIds.add(klass.name);
-        }
 
         AbstractSymbol filename = AbstractTable.stringtable.addString("<basic class>");
 
@@ -151,37 +151,86 @@ public class CGenUtil {
                               new no_expr(0))),
                               filename);
 
-        classesByName.put(TreeConstants.Object_, Object_class);
-        classesByName.put(TreeConstants.IO, IO_class);
-        classesByName.put(TreeConstants.Int, Int_class);
-        classesByName.put(TreeConstants.Bool, Bool_class);
-        classesByName.put(TreeConstants.Str, Str_class);
 
-        classIds.add(TreeConstants.Object_);
-        classIds.add(TreeConstants.IO);
-        classIds.add(TreeConstants.Int);
-        classIds.add(TreeConstants.Bool);
-        classIds.add(TreeConstants.Str);
+        classes.add(Object_class);
+        classes.add(IO_class);
+        classes.add(Str_class);
+        classes.add(Bool_class);
+        classes.add(Int_class);
+
+        for (class_c klass : classes) {
+            classesByName.put(klass.name, klass);
+            classIds.add(klass.name);
+        }
     }
 
-    public void push(String register) {
-        out.println("\tsw " + register + " 0($sp)");
+    public int push(String register) {
+        pushNoCount(register);
+        numPushes.push(numPushes.pop() + 1);
+
+        return getFpOffset();
+    }
+
+    public void pushNoCount(String register) {
+        out.println("\tsw " + register + " 0($sp)\t#push " + register);
         out.println("\taddiu $sp $sp -4");
     }
 
     public void getTop(String register) {
-        out.println("\tlw " + register + " 4($sp)");
+        out.println("\tlw " + register + " 4($sp)\t#peek " + register);
     }
 
     public void pop() {
-        out.println("\taddiu $sp $sp 4");
+        popNoCount();
+        numPushes.push(numPushes.pop() - 1);
+    }
+
+    public void popNoCount() {
+        out.println("\taddiu $sp $sp 4\t#pop");
+    }
+
+    public void enterScope() {
+        numPushes.push(0);
+    }
+
+    public void exitScope() {
+        numPushes.pop();
+    }
+
+    private int getFpOffset() {
+        int n = numPushes.peek() - 1;
+        return n * -4;
+    }
+
+    public void pushLocalVariable(AbstractSymbol name, int offset) {
+        if (!this.localVariables.containsKey(name)) {
+            this.localVariables.put(name, new Stack<Integer>());
+        }
+
+        this.localVariables.get(name).push(offset);
+    }
+
+    public void popLocalVariable(AbstractSymbol name) {
+        this.localVariables.get(name).pop();
+    }
+
+    public int getLocalVariableOffset(AbstractSymbol name) {
+        if (!this.localVariables.containsKey(name)) {
+            return -1;
+        }
+
+        if (this.localVariables.get(name).empty()) {
+            return -1;
+        }
+
+        return this.localVariables.get(name).peek();
     }
 
     public String emitCoolDataString(String value) {
         String lengthLabel = emitCoolDataInt(value.length());
 
         String label = emitNewDataLabel();
-        dataOut.println("\t.word 5");
+        dataOut.println("\t.word " + getClassId(TreeConstants.Str));
         int length = 4 + value.length() / 4 + 1;
 
         dataOut.println("\t.word " + length);
@@ -200,7 +249,7 @@ public class CGenUtil {
     public String emitCoolDataInt(int value) {
         String label = emitNewDataLabel();
 
-        dataOut.println("\t.word 3");
+        dataOut.println("\t.word " + getClassId(TreeConstants.Int));
         dataOut.println("\t.word 4");
         dataOut.println("\t.word Int_dispTab");
         dataOut.println("\t.word " + value);
@@ -212,7 +261,7 @@ public class CGenUtil {
     public String emitCoolDataBool(boolean value) {
         String label = emitNewDataLabel();
 
-        dataOut.println("\t.word 4");
+        dataOut.println("\t.word " + getClassId(TreeConstants.Bool));
         dataOut.println("\t.word 4");
         dataOut.println("\t.word Bool_dispTab");
 
@@ -239,7 +288,7 @@ public class CGenUtil {
         }
 
         dataOut.println(klass.name + "_protObj:");
-        dataOut.println("\t.word 2"); // FIXME
+        dataOut.println("\t.word " + getClassId(klass.name));
         int length = 3 + attrLabels.size();
         dataOut.println("\t.word " + length);
         dataOut.println("\t.word " + klass.name + "_dispTab");
@@ -249,6 +298,84 @@ public class CGenUtil {
         }
 
         dataOut.println("\t.word -1");
+    }
+
+    public void emitDispatchTable(class_c klass) {
+        dataOut.println(klass.name + "_dispTab:");
+        for (method m : klass.getCallableMethods(this)) {
+            class_c definer = klass.getDefiningClass(this, m);
+            dataOut.println("\t.word " + definer.name + "." + m.name);
+        }
+    }
+
+    public void emitDataTables() {
+        dataOut.println("_int_tag: " + getClassId(TreeConstants.Int));
+        dataOut.println("_bool_tag: " + getClassId(TreeConstants.Bool));
+        dataOut.println("_string_tag: " + getClassId(TreeConstants.Str));
+
+        dataOut.println("bool_const0:");
+        dataOut.println("\t.word " + getClassId(TreeConstants.Bool));
+        dataOut.println("\t.word 4");
+        dataOut.println("\t.word Bool_dispTab");
+        dataOut.println("\t.word 0");
+        dataOut.println("\t.word -1");
+
+        dataOut.println("bool_const1:");
+        dataOut.println("\t.word " + getClassId(TreeConstants.Bool));
+        dataOut.println("\t.word 4");
+        dataOut.println("\t.word Bool_dispTab");
+        dataOut.println("\t.word 1");
+        dataOut.println("\t.word -1");
+
+        List<String> labels = new ArrayList<>();
+        for (class_c klass : getClasses()) {
+            labels.add(emitCoolDataString(klass.name.toString()));
+        }
+
+        dataOut.println("class_nameTab:");
+        for (String label : labels) {
+            dataOut.println("\t.word " + label);
+        }
+
+        dataOut.println("class_objTab:");
+        for (class_c klass : getClasses()) {
+            dataOut.println("\t.word " + klass.name + "_protObj");
+            dataOut.println("\t.word " + klass.name + "_init");
+        }
+    }
+
+    public void emitInit(class_c klass) {
+        out.println(klass.name + "_init:");
+        enterScope();
+
+        pushNoCount("$fp");
+        out.println("\tmove $fp $sp");
+        push("$ra");
+        push("$s0");
+        out.println("\tmove $s0 $a0");
+
+        out.println("\tjal " + getClassByName(klass.parent).name + "_init");
+
+        for (int i = 0; i < klass.features.getLength(); i++) {
+            if (klass.features.getNth(i) instanceof attr) {
+                attr a = (attr) klass.features.getNth(i);
+
+                a.init.cgen(this);
+                int offset = 12 + 4 * klass.getAttrIndex(this, a.name);
+                out.println("\tsw $a0 " + offset + "($s0)");
+            }
+        }
+
+        out.println("\tmove $a0 $s0");
+        getTop("$s0");
+        pop();
+        getTop("$ra");
+        pop();
+        getTop("$fp");
+        popNoCount();
+        out.println("\tjr $ra");
+
+        exitScope();
     }
 
     private String emitNewDataLabel() {
@@ -287,8 +414,14 @@ public class CGenUtil {
         return classesByName.get(klass);
     }
 
-    public Collection<class_c> getClasses() {
-        return classesByName.values();
+    public List<class_c> getClasses() {
+        List<class_c> result = new ArrayList<>();
+
+        for (int i = 0; i < numClasses(); i++) {
+            result.add(getClassByName(getClassById(i)));
+        }
+
+        return result;
     }
 
     public boolean isBasicClass(class_c klass) {

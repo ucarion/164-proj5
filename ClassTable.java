@@ -41,9 +41,9 @@ class ClassTable {
      * you want.
      * */
     private void installBasicClasses() {
-	AbstractSymbol filename 
+	AbstractSymbol filename
 	    = AbstractTable.stringtable.addString("<basic class>");
-	
+
 	// The following demonstrates how to create dummy parse trees to
 	// refer to basic Cool classes.  There's no need for method
 	// bodies -- these are already built into the runtime system.
@@ -55,19 +55,19 @@ class ClassTable {
 
 	// The Object class has no parent class. Its methods are
 	//        cool_abort() : Object    aborts the program
-	//        type_name() : Str        returns a string representation 
+	//        type_name() : Str        returns a string representation
 	//                                 of class name
 	//        copy() : SELF_TYPE       returns a copy of the object
 
-	class_c Object_class = 
-	    new class_c(0, 
-		       TreeConstants.Object_, 
+	class_c Object_class =
+	    new class_c(0,
+		       TreeConstants.Object_,
 		       TreeConstants.No_class,
 		       new Features(0)
-			   .appendElement(new method(0, 
-					      TreeConstants.cool_abort, 
-					      new Formals(0), 
-					      TreeConstants.Object_, 
+			   .appendElement(new method(0,
+					      TreeConstants.cool_abort,
+					      new Formals(0),
+					      TreeConstants.Object_,
 					      new no_expr(0)))
 			   .appendElement(new method(0,
 					      TreeConstants.type_name,
@@ -80,14 +80,14 @@ class ClassTable {
 					      TreeConstants.SELF_TYPE,
 					      new no_expr(0))),
 		       filename);
-	
+
 	// The IO class inherits from Object. Its methods are
 	//        out_string(Str) : SELF_TYPE  writes a string to the output
 	//        out_int(Int) : SELF_TYPE      "    an int    "  "     "
 	//        in_string() : Str            reads a string from the input
 	//        in_int() : Int                "   an int     "  "     "
 
-	class_c IO_class = 
+	class_c IO_class =
 	    new class_c(0,
 		       TreeConstants.IO,
 		       TreeConstants.Object_,
@@ -123,7 +123,7 @@ class ClassTable {
 	// The Int class has no methods and only a single attribute, the
 	// "val" for the integer.
 
-	class_c Int_class = 
+	class_c Int_class =
 	    new class_c(0,
 		       TreeConstants.Int,
 		       TreeConstants.Object_,
@@ -135,7 +135,7 @@ class ClassTable {
 		       filename);
 
 	// Bool also has only the "val" slot.
-	class_c Bool_class = 
+	class_c Bool_class =
 	    new class_c(0,
 		       TreeConstants.Bool,
 		       TreeConstants.Object_,
@@ -175,7 +175,7 @@ class ClassTable {
 					      TreeConstants.concat,
 					      new Formals(0)
 						  .appendElement(new formalc(0,
-								     TreeConstants.arg, 
+								     TreeConstants.arg,
 								     TreeConstants.Str)),
 					      TreeConstants.Str,
 					      new no_expr(0)))
@@ -198,7 +198,7 @@ class ClassTable {
 		classesByName.put(TreeConstants.Bool, Bool_class);
 		classesByName.put(TreeConstants.Str, Str_class);
     }
-	
+
     public ClassTable(Classes cls) {
 		semantErrors = 0;
 		errorStream = System.err;
