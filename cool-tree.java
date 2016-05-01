@@ -397,6 +397,7 @@ class programc extends Program {
         CGenUtil util = new CGenUtil(new PrintStream(buffer), classes);
 
         util.emitDataTables();
+        util.emitFilename(classes.get(0).getFilename());
 
         for (class_c klass : util.getClasses()) {
             klass.cgen(util);
@@ -715,9 +716,8 @@ class class_c extends Class_ {
             return;
         }
 
-        util.emitInit(this);
-
         util.setCurrentClass(this);
+        util.emitInit(this);
 
         for (int i = 0; i < features.getLength(); i++) {
             Feature f = (Feature) features.getNth(i);
@@ -1204,6 +1204,26 @@ class static_dispatch extends Expression {
     }
 
     public void cgen(CGenUtil util) {
+        for (int i = 0; i < actual.getLength(); i++) {
+            Expression e = (Expression) actual.getNth(i);
+            e.cgen(util);
+            util.pushNoCount("$a0");
+        }
+
+        expr.cgen(util);
+
+        String okLabel = util.getNewLabel();
+        util.out.println("\tbne $a0 $zero "  + okLabel);
+        util.out.println("\tli $t1 " + getLineNumber());
+        util.out.println("\tla $a0 " + util.getFilenameLabel());
+        util.out.println("\tj _dispatch_abort");
+
+        class_c exprClass = util.getClassByName(type_name);
+        int offset = 4 * exprClass.getMethodIndex(util, name);
+        util.out.println(okLabel + ":");
+        util.out.println("\tla $t0 " + type_name + "_dispTab");
+        util.out.println("\tlw $t0 "  + offset + "($t0)");
+        util.out.println("\tjalr $t0");
     }
 }
 
@@ -1313,8 +1333,15 @@ class dispatch extends Expression {
 
         expr.cgen(util);
 
+        String okLabel = util.getNewLabel();
+        util.out.println("\tbne $a0 $zero "  + okLabel);
+        util.out.println("\tli $t1 " + getLineNumber());
+        util.out.println("\tla $a0 " + util.getFilenameLabel());
+        util.out.println("\tj _dispatch_abort");
+
         class_c exprClass = util.resolveIfSelfType(expr.get_type());
         int offset = 4 * exprClass.getMethodIndex(util, name);
+        util.out.println(okLabel + ":");
         util.out.println("\tlw $t0 8($a0)");
         util.out.println("\tlw $t0 "  + offset + "($t0)");
         util.out.println("\tjalr $t0");
@@ -1526,8 +1553,15 @@ class typcase extends Expression {
 
     public void cgen(CGenUtil util) {
         expr.cgen(util);
-        util.out.println("\tlw $t0 0($a0)");
 
+        String okLabel = util.getNewLabel();
+        util.out.println("\tbne $a0 $zero " + okLabel);
+        util.out.println("\tla $a0 " + util.getFilenameLabel());
+        util.out.println("\tli $t1 " + getLineNumber());
+        util.out.println("\tj _case_abort2");
+
+        util.out.println(okLabel + ":");
+        util.out.println("\tlw $t0 0($a0)");
         int offset = util.push("$a0");
 
         List<String> branchLabels = new ArrayList<>();

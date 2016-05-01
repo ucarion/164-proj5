@@ -344,6 +344,16 @@ public class CGenUtil {
         }
     }
 
+    private String filenameLabel;
+
+    public void emitFilename(AbstractSymbol filename) {
+        this.filenameLabel = emitCoolDataString(filename.toString());
+    }
+
+    public String getFilenameLabel() {
+        return filenameLabel;
+    }
+
     public void emitInit(class_c klass) {
         out.println(klass.name + "_init:");
         enterScope();
