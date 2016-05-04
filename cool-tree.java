@@ -84,7 +84,7 @@ abstract class Feature extends TreeNode {
     }
     public abstract void dump_with_types(PrintStream out, int n);
 
-    protected abstract void assignTypes(ClassTable classTable, SymbolTable symbolTable);
+    protected abstract void assignTypes(KlassTable classTable, SymbolTable symbolTable);
     protected abstract AbstractSymbol getName();
 }
 
@@ -168,7 +168,7 @@ abstract class Expression extends TreeNode {
         else
             { out.println(Utilities.pad(n) + ": _no_type"); }
     }
-     protected abstract void assignTypes(ClassTable classTable, SymbolTable symbolTable);
+     protected abstract void assignTypes(KlassTable classTable, SymbolTable symbolTable);
     public abstract void cgen(CGenUtil util);
 
 }
@@ -284,8 +284,8 @@ class programc extends Program {
 	to test the complete compiler.
     */
     public void semant() {
-        /* ClassTable constructor may do some semantic analysis */
-        ClassTable classTable = new ClassTable(classes);
+        /* KlassTable  constructor may do some semantic analysis */
+        KlassTable classTable = new KlassTable(classes);
 
         //First Pass: Check that there are no cycles in inheritance graph
         Map<AbstractSymbol, AbstractSymbol> inheritance = checkInheritanceCycles();
@@ -366,7 +366,7 @@ class programc extends Program {
     }
 
     //Return true if Main.main() exists, false otherwise
-    private boolean checkForMain(ClassTable classTable) {
+    private boolean checkForMain(KlassTable  classTable) {
         class_c mainClass = classTable.getClassByName(TreeConstants.Main);
         if (mainClass == null) {
             return false;
@@ -495,7 +495,7 @@ class class_c extends Class_ {
 
     //assign types to class, make sure no two classes share a name, and that class
     // doesn't inherit from basic classes (Int, Bool, String)
-    protected void assignTypes(ClassTable classTable) {
+    protected void assignTypes(KlassTable  classTable) {
         SymbolTable symbolTable = new SymbolTable();
         symbolTable.enterScope();
         symbolTable.addId(TreeConstants.self, name);
@@ -527,7 +527,7 @@ class class_c extends Class_ {
     }
 
     //get attribute of class using attribute's name
-	protected method getMethod(AbstractSymbol name, ClassTable classTable) {
+	protected method getMethod(AbstractSymbol name, KlassTable  classTable) {
 		for (int i = 0; i < features.getLength(); i++) {
 			Feature feature = (Feature) features.getNth(i);
 			if (feature instanceof method) {
@@ -569,7 +569,7 @@ class class_c extends Class_ {
 
 
     //get attribute of class using attribute's name
-	protected attr getAttr(AbstractSymbol name, ClassTable classTable) {
+	protected attr getAttr(AbstractSymbol name, KlassTable  classTable) {
 		for (int i = 0; i < features.getLength(); i++) {
 			Feature feature = (Feature) features.getNth(i);
 			if (feature instanceof attr) {
@@ -589,7 +589,7 @@ class class_c extends Class_ {
 		}
 	}
     // method to check that current is either klass or a descendent thereof
-    protected boolean conformsTo(ClassTable classTable, AbstractSymbol klass) {
+    protected boolean conformsTo(KlassTable  classTable, AbstractSymbol klass) {
         if (name.equals(klass)) {
             return true;
         }
@@ -780,7 +780,7 @@ class method extends Feature {
     //assign types to method, make sure no two methods in the same class share a name, that
     // parameters have different names and existing types, and that inheritence rules for
     // overriding methods are followed
-    protected void assignTypes(ClassTable classTable, SymbolTable symbolTable) {
+    protected void assignTypes(KlassTable  classTable, SymbolTable symbolTable) {
         symbolTable.enterScope();
 
         if (!return_type.equals(TreeConstants.SELF_TYPE) && classTable.getClassByName(return_type) == null) {
@@ -927,7 +927,7 @@ class attr extends Feature {
 
     // /assign types to attributes, make sure that <Class>.<attribute> has an existing <Class>,
     // and that initialized attribute has intial value of type conforming to its declaration
-    protected void assignTypes(ClassTable classTable, SymbolTable symbolTable) {
+    protected void assignTypes(KlassTable  classTable, SymbolTable symbolTable) {
         init.assignTypes(classTable, symbolTable);
 
         if (classTable.getClassByName(type_decl) == null) {
@@ -1067,7 +1067,7 @@ class assign extends Expression {
 
     //assign types to assignment statements and make sure expression being assigned
     // conforms to type of variable
-    protected void assignTypes(ClassTable classTable, SymbolTable symbolTable) {
+    protected void assignTypes(KlassTable  classTable, SymbolTable symbolTable) {
 		expr.assignTypes(classTable, symbolTable);
 
         class_c selfClass = classTable.getClassByName((AbstractSymbol) symbolTable.lookup(TreeConstants.self));
@@ -1153,7 +1153,7 @@ class static_dispatch extends Expression {
 
     //assign types to static dispatch (<expr>@<type>.id(<expr>,...,<expr>)), and make
     // sure that the method is called correctly
-    protected void assignTypes(ClassTable classTable, SymbolTable symbolTable) {
+    protected void assignTypes(KlassTable  classTable, SymbolTable symbolTable) {
         expr.assignTypes(classTable, symbolTable);
 
         for (int i = 0; i < actual.getLength(); i++) {
@@ -1274,7 +1274,7 @@ class dispatch extends Expression {
 
     //assign types to non-static dispatch (<type>.id(<expr>,...,<expr>) or id(<expr>,...,<expr>)), and make
     // sure that the method is called correctly
-    protected void assignTypes(ClassTable classTable, SymbolTable symbolTable) {
+    protected void assignTypes(KlassTable  classTable, SymbolTable symbolTable) {
         expr.assignTypes(classTable, symbolTable);
 
         for (int i = 0; i < actual.getLength(); i++) {
@@ -1391,7 +1391,7 @@ class cond extends Expression {
 
     //assign type to an if-then-else statement and make sure the bit between if and then
     // is a Bool
-    protected void assignTypes(ClassTable classTable, SymbolTable symbolTable) {
+    protected void assignTypes(KlassTable  classTable, SymbolTable symbolTable) {
         pred.assignTypes(classTable, symbolTable);
         then_exp.assignTypes(classTable, symbolTable);
         else_exp.assignTypes(classTable, symbolTable);
@@ -1456,7 +1456,7 @@ class loop extends Expression {
     }
 
     //assign type to while loop
-    protected void assignTypes(ClassTable classTable, SymbolTable symbolTable) {
+    protected void assignTypes(KlassTable  classTable, SymbolTable symbolTable) {
         pred.assignTypes(classTable, symbolTable);
         body.assignTypes(classTable, symbolTable);
 
@@ -1525,7 +1525,7 @@ class typcase extends Expression {
      * The only possible error for type cases is not having any branches at all,
      * which causes a parser, not semantic, error.
      */
-    protected void assignTypes(ClassTable classTable, SymbolTable symbolTable) {
+    protected void assignTypes(KlassTable  classTable, SymbolTable symbolTable) {
         expr.assignTypes(classTable, symbolTable);
 
         for (int i = 0; i < cases.getLength(); i++) {
@@ -1629,7 +1629,7 @@ class block extends Expression {
     }
 
     //type of last expression in block is type of block
-    protected void assignTypes(ClassTable classTable, SymbolTable symbolTable) {
+    protected void assignTypes(KlassTable  classTable, SymbolTable symbolTable) {
         for (int i = 0; i < body.getLength(); i++) {
             Expression expr = (Expression) body.getNth(i);
             expr.assignTypes(classTable, symbolTable);
@@ -1697,7 +1697,7 @@ class let extends Expression {
 
     //assign type to let expression, make sure that assignments of variables in let
     // have types comforming to declared types
-    protected void assignTypes(ClassTable classTable, SymbolTable symbolTable) {
+    protected void assignTypes(KlassTable  classTable, SymbolTable symbolTable) {
         init.assignTypes(classTable, symbolTable);
 
         symbolTable.enterScope();
@@ -1778,7 +1778,7 @@ class plus extends Expression {
     }
 
     //assign type to addition expression
-    protected void assignTypes(ClassTable classTable, SymbolTable symbolTable) {
+    protected void assignTypes(KlassTable  classTable, SymbolTable symbolTable) {
 		e1.assignTypes(classTable, symbolTable);
 		e2.assignTypes(classTable, symbolTable);
 
@@ -1844,7 +1844,7 @@ class sub extends Expression {
 	dump_type(out, n);
     }
 
-    protected void assignTypes(ClassTable classTable, SymbolTable symbolTable) {
+    protected void assignTypes(KlassTable  classTable, SymbolTable symbolTable) {
         e1.assignTypes(classTable, symbolTable);
 		e2.assignTypes(classTable, symbolTable);
 
@@ -1910,7 +1910,7 @@ class mul extends Expression {
 	dump_type(out, n);
     }
 
-    protected void assignTypes(ClassTable classTable, SymbolTable symbolTable) {
+    protected void assignTypes(KlassTable  classTable, SymbolTable symbolTable) {
         e1.assignTypes(classTable, symbolTable);
 		e2.assignTypes(classTable, symbolTable);
 
@@ -1976,7 +1976,7 @@ class divide extends Expression {
 	dump_type(out, n);
     }
 
-    protected void assignTypes(ClassTable classTable, SymbolTable symbolTable) {
+    protected void assignTypes(KlassTable  classTable, SymbolTable symbolTable) {
         e1.assignTypes(classTable, symbolTable);
 		e2.assignTypes(classTable, symbolTable);
 
@@ -2038,7 +2038,7 @@ class neg extends Expression {
 	dump_type(out, n);
     }
 
-    protected void assignTypes(ClassTable classTable, SymbolTable symbolTable) {
+    protected void assignTypes(KlassTable  classTable, SymbolTable symbolTable) {
         e1.assignTypes(classTable, symbolTable);
 
         if (!e1.get_type().equals(TreeConstants.Int)) {
@@ -2100,7 +2100,7 @@ class lt extends Expression {
     }
 
     //assign type to comparison expression. Make sure expressions being compared are Ints
-    protected void assignTypes(ClassTable classTable, SymbolTable symbolTable) {
+    protected void assignTypes(KlassTable  classTable, SymbolTable symbolTable) {
         e1.assignTypes(classTable, symbolTable);
         e2.assignTypes(classTable, symbolTable);
 
@@ -2169,7 +2169,7 @@ class eq extends Expression {
     }
 
     //assign type to comparison expression. Make sure expressions being compared can be compared
-    protected void assignTypes(ClassTable classTable, SymbolTable symbolTable) {
+    protected void assignTypes(KlassTable  classTable, SymbolTable symbolTable) {
         e1.assignTypes(classTable, symbolTable);
         e2.assignTypes(classTable, symbolTable);
 
@@ -2238,7 +2238,7 @@ class leq extends Expression {
     }
 
     //assign type to comparison expression. Make sure expressions being compared are Ints
-    protected void assignTypes(ClassTable classTable, SymbolTable symbolTable) {
+    protected void assignTypes(KlassTable  classTable, SymbolTable symbolTable) {
         e1.assignTypes(classTable, symbolTable);
         e2.assignTypes(classTable, symbolTable);
 
@@ -2303,7 +2303,7 @@ class comp extends Expression {
     }
 
     //assign Bool type to boolean inversion. Make sure expr being inverted is Bool
-    protected void assignTypes(ClassTable classTable, SymbolTable symbolTable) {
+    protected void assignTypes(KlassTable  classTable, SymbolTable symbolTable) {
         e1.assignTypes(classTable, symbolTable);
 
         if (!e1.get_type().equals(TreeConstants.Bool)) {
@@ -2361,7 +2361,7 @@ class int_const extends Expression {
 	dump_type(out, n);
     }
 
-    protected void assignTypes(ClassTable classTable, SymbolTable symbolTable) {
+    protected void assignTypes(KlassTable  classTable, SymbolTable symbolTable) {
         set_type(TreeConstants.Int);
     }
 
@@ -2402,7 +2402,7 @@ class bool_const extends Expression {
 	dump_type(out, n);
     }
 
-    protected void assignTypes(ClassTable classTable, SymbolTable symbolTable) {
+    protected void assignTypes(KlassTable  classTable, SymbolTable symbolTable) {
         set_type(TreeConstants.Bool);
     }
 
@@ -2445,7 +2445,7 @@ class string_const extends Expression {
 	dump_type(out, n);
     }
 
-    protected void assignTypes(ClassTable classTable, SymbolTable symbolTable) {
+    protected void assignTypes(KlassTable  classTable, SymbolTable symbolTable) {
 		set_type(TreeConstants.Str);
     }
 
@@ -2486,7 +2486,7 @@ class new_ extends Expression {
 	dump_type(out, n);
     }
 
-    protected void assignTypes(ClassTable classTable, SymbolTable symbolTable) {
+    protected void assignTypes(KlassTable  classTable, SymbolTable symbolTable) {
         if (classTable.getClassByName(type_name) == null) {
             classTable.semantError().println("Cannot create new instance of unknown class: " + type_name);
         } else {
@@ -2532,7 +2532,7 @@ class isvoid extends Expression {
 	dump_type(out, n);
     }
 
-    protected void assignTypes(ClassTable classTable, SymbolTable symbolTable) {
+    protected void assignTypes(KlassTable  classTable, SymbolTable symbolTable) {
         e1.assignTypes(classTable, symbolTable);
         set_type(TreeConstants.Bool);
     }
@@ -2567,7 +2567,7 @@ class no_expr extends Expression {
 	dump_type(out, n);
     }
 
-    protected void assignTypes(ClassTable classTable, SymbolTable symbolTable) {
+    protected void assignTypes(KlassTable  classTable, SymbolTable symbolTable) {
 
     }
 
@@ -2607,7 +2607,7 @@ class object extends Expression {
 	dump_type(out, n);
     }
 
-    protected void assignTypes(ClassTable classTable, SymbolTable symbolTable) {
+    protected void assignTypes(KlassTable  classTable, SymbolTable symbolTable) {
         if (name == TreeConstants.self) {
             set_type(TreeConstants.SELF_TYPE);
         } else {
