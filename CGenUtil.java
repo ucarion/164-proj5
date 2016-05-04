@@ -370,9 +370,11 @@ public class CGenUtil {
             if (klass.features.getNth(i) instanceof attr) {
                 attr a = (attr) klass.features.getNth(i);
 
-                a.init.cgen(this);
-                int offset = 12 + 4 * klass.getAttrIndex(this, a.name);
-                out.println("\tsw $a0 " + offset + "($s0)");
+                if (!(a.init instanceof no_expr)) {
+                    a.init.cgen(this);
+                    int offset = 12 + 4 * klass.getAttrIndex(this, a.name);
+                    out.println("\tsw $a0 " + offset + "($s0)");
+                }
             }
         }
 

@@ -2538,6 +2538,16 @@ class isvoid extends Expression {
     }
 
     public void cgen(CGenUtil util) {
+        e1.cgen(util);
+
+        String isVoidLabel = util.getNewLabel();
+        String doneLabel = util.getNewLabel();
+        util.out.println("\tbeq $a0 $zero " + isVoidLabel);
+        util.out.println("\tla $a0 bool_const0");
+        util.out.println("\tj " + doneLabel);
+        util.out.println(isVoidLabel + ":");
+        util.out.println("\tla $a0 bool_const1");
+        util.out.println(doneLabel + ":");
     }
 }
 
